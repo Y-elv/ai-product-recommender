@@ -87,11 +87,22 @@ async def root():
     return {
         "message": "Welcome to AI Construction Product Recommender API",
         "version": "1.0.0",
+        "status": "healthy",
         "endpoints": {
             "recommendations": "/api/v1/recommend/{product_id}",
             "products": "/api/v1/products",
+            "user_recommendations": "/api/v1/users/{user_id}/recommendations",
             "docs": "/docs"
         }
+    }
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Render"""
+    return {
+        "status": "healthy",
+        "message": "AI Recommender API is running",
+        "timestamp": datetime.utcnow().isoformat() + "Z"
     }
 
 @app.get("/api/v1/recommend/{product_id}")
