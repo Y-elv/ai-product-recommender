@@ -35,19 +35,27 @@ class ProductImageResponse(BaseModel):
         from_attributes = True
 
 class ProductCreate(BaseModel):
+    product_id: str  # Original product ID from Node.js system
     name: str
     description: str
     price: float
     stock: int = 0
     category: str
+    user_id: Optional[str] = None
+    interaction_weight: Optional[float] = 1.0
+    interaction_type: Optional[str] = None
 
 class ProductResponse(BaseModel):
     id: str
+    product_id: str
     name: str
     description: str
     price: float
     stock: int
     category: str
+    user_id: Optional[str] = None
+    interaction_weight: Optional[float] = None
+    interaction_type: Optional[str] = None
     images: List[ProductImageResponse] = []
     similarity_score: float = None
 
@@ -62,6 +70,7 @@ class PaginatedProductsResponse(BaseModel):
 class RecommendationResponse(BaseModel):
     success: bool = True
     data: Dict[str, Any]
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -185,13 +194,28 @@ async def create_product(
     product: ProductCreate,
     db: Session = Depends(get_db)
 ):
-    """Create a new construction product"""
+    """Create a new construction product with user interaction data"""
+    
+    # Set interaction weight based on interaction type
+    weight_map = {
+        'view': 1.0,
+        'click': 2.0,
+        'add_to_cart': 5.0,
+        'purchase': 10.0
+    }
+    
+    interaction_weight = weight_map.get(product.interaction_type, product.interaction_weight or 1.0)
+    
     new_product = Product(
+        product_id=product.product_id,
         name=product.name,
         description=product.description,
         category=product.category,
         price=product.price,
-        stock=product.stock
+        stock=product.stock,
+        user_id=product.user_id,
+        interaction_weight=interaction_weight,
+        interaction_type=product.interaction_type
     )
     db.add(new_product)
     db.commit()
@@ -202,11 +226,15 @@ async def create_product(
     
     return ProductResponse(
         id=new_product.id,
+        product_id=new_product.product_id,
         name=new_product.name,
         description=new_product.description,
         price=new_product.price,
         stock=new_product.stock,
         category=new_product.category,
+        user_id=new_product.user_id,
+        interaction_weight=new_product.interaction_weight,
+        interaction_type=new_product.interaction_type,
         images=[]
     )
 
@@ -228,6 +256,117 @@ async def delete_product(product_id: str, db: Session = Depends(get_db)):
     recommender.fit(db)
     
     return {"success": True, "message": f"Product {product_id} deleted successfully"}
+
+@app.get("/api/v1/users/{user_id}/recommendations")
+async def get_user_recommendations(
+    user_id: str,
+    top_n: int = 5,
+    db: Session = Depends(get_db)
+):
+    """Get personalized recommendations for a specific user based on their product interactions"""
+    
+    # Get user's products with interaction data
+    user_products = db.query(Product).filter(
+        Product.user_id == user_id
+    ).order_by(Product.interaction_weight.desc(), Product.created_at.desc()).limit(20).all()
+    
+    if not user_products:
+        # If no user products, return popular products (highest interaction weight)
+        popular_products = db.query(Product).filter(
+            Product.interaction_weight.isnot(None)
+        ).order_by(Product.interaction_weight.desc()).limit(top_n).all()
+        
+        if not popular_products:
+            # Fallback to newest products
+            popular_products = db.query(Product).order_by(Product.created_at.desc()).limit(top_n).all()
+        
+        return RecommendationResponse(
+            data={
+                "user_id": user_id,
+                "type": "popular",
+                "recommendations": [
+                    {
+                        "id": product.id,
+                        "name": product.name,
+                        "description": product.description,
+                        "category": product.category,
+                        "price": product.price,
+                        "stock": product.stock,
+                        "interaction_weight": product.interaction_weight,
+                        "interaction_type": product.interaction_type,
+                        "similarity_score": 0.0
+                    }
+                    for product in popular_products
+                ]
+            }
+        )
+    
+    # Get AI recommendations for each user product
+    all_recommendations = []
+    
+    for product in user_products[:5]:  # Top 5 user products by weight
+        try:
+            recommendations = recommender.get_recommendations(product.id, top_n=3)
+            # Boost similarity score based on user interaction weight
+            for rec in recommendations:
+                boost_factor = (product.interaction_weight or 1.0) * 0.1
+                rec['similarity_score'] = min(1.0, rec['similarity_score'] + boost_factor)
+                rec['interaction_weight'] = product.interaction_weight
+                rec['interaction_type'] = product.interaction_type
+            all_recommendations.extend(recommendations)
+        except:
+            continue
+    
+    # Remove duplicates and sort by similarity score
+    unique_recommendations = []
+    seen_ids = set()
+    for rec in all_recommendations:
+        if rec['id'] not in seen_ids:
+            unique_recommendations.append(rec)
+            seen_ids.add(rec['id'])
+    
+    # Sort by similarity score and take top N
+    unique_recommendations.sort(key=lambda x: x['similarity_score'], reverse=True)
+    final_recommendations = unique_recommendations[:top_n]
+    
+    return RecommendationResponse(
+        data={
+            "user_id": user_id,
+            "type": "personalized",
+            "recommendations": final_recommendations,
+            "based_on_products": len(user_products)
+        }
+    )
+
+@app.get("/api/v1/users/{user_id}/products")
+async def get_user_products(
+    user_id: str,
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    """Get user's product interaction history"""
+    
+    products = db.query(Product).filter(
+        Product.user_id == user_id
+    ).order_by(Product.created_at.desc()).limit(limit).all()
+    
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": product.id,
+                "name": product.name,
+                "description": product.description,
+                "category": product.category,
+                "price": product.price,
+                "stock": product.stock,
+                "interaction_type": product.interaction_type,
+                "interaction_weight": product.interaction_weight,
+                "created_at": product.created_at.isoformat() + "Z" if product.created_at else None
+            }
+            for product in products
+        ]
+    }
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -64,11 +64,15 @@ class ConstructionProductRecommender:
         self.products_df = pd.DataFrame([
             {
                 'id': product.id,
+                'product_id': product.product_id,
                 'name': product.name,
                 'description': product.description or '',
                 'category': product.category,
                 'price': product.price,
-                'stock': product.stock
+                'stock': product.stock,
+                'user_id': product.user_id,
+                'interaction_weight': product.interaction_weight or 1.0,
+                'interaction_type': product.interaction_type or 'view'
             }
             for product in products
         ])
@@ -92,10 +96,16 @@ class ConstructionProductRecommender:
         # Add price tier information
         price_tier = pd.cut(normalized_price, bins=5, labels=['budget', 'economy', 'mid', 'premium', 'luxury'])
         
-        # Combine features with price tier
+        # Add interaction weight and type to features
         enhanced_features = []
         for i, feature in enumerate(features):
-            enhanced_feature = f"{feature} {price_tier.iloc[i]}"
+            product = self.products_df.iloc[i]
+            # Add interaction weight as a feature
+            weight_tier = 'low' if product['interaction_weight'] < 3 else 'medium' if product['interaction_weight'] < 7 else 'high'
+            # Add interaction type
+            interaction_type = product['interaction_type'] or 'view'
+            
+            enhanced_feature = f"{feature} {price_tier.iloc[i]} {weight_tier} {interaction_type}"
             enhanced_features.append(enhanced_feature)
         
         # Create TF-IDF vectors
@@ -127,11 +137,15 @@ class ConstructionProductRecommender:
                     product = self.products_df.iloc[idx]
                     recommendations.append({
                         'id': str(product['id']),
+                        'product_id': str(product['product_id']),
                         'name': product['name'],
                         'description': product['description'],
                         'category': product['category'],
                         'price': float(product['price']),
                         'stock': int(product['stock']),
+                        'user_id': product['user_id'],
+                        'interaction_weight': float(product['interaction_weight']),
+                        'interaction_type': product['interaction_type'],
                         'similarity_score': float(similarity_scores[idx])
                     })
             

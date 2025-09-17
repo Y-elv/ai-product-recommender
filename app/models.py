@@ -9,11 +9,16 @@ class Product(Base):
     
     # Use UUID to match Node.js database structure
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
+    product_id = Column(String, index=True)  # Original product ID from Node.js system
     name = Column(String, index=True)
     description = Column(Text, nullable=True)
     price = Column(Float)
     stock = Column(Integer, default=0)
     category = Column(String, index=True)
+    # User interaction fields
+    user_id = Column(String, index=True)  # User ID from your Node.js app
+    interaction_weight = Column(Float, default=1.0)  # Weight for different interaction types
+    interaction_type = Column(String, index=True)  # 'view', 'click', 'add_to_cart', 'purchase'
     created_at = Column(DateTime, default=datetime.utcnow, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
 
