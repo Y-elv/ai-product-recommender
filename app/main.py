@@ -8,6 +8,8 @@ from datetime import datetime
 from .database import get_db, engine
 from .models import Product, ProductImage, Base
 from .recommender import recommender
+from fastapi.middleware.cors import CORSMiddleware
+import os
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -17,6 +19,18 @@ app = FastAPI(
     title="AI Construction Product Recommender",
     description="A FastAPI application for AI-based construction product recommendations",
     version="1.0.0"
+)
+
+# CORS configuration
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "https://www.constructkvv.com,http://localhost:3001")
+allowed_origins = [origin.strip() for origin in FRONTEND_ORIGIN.split(",") if origin.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Pydantic schemas
